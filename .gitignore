@@ -1,0 +1,38 @@
+# --- Python 后端过滤 ---
+# 过滤虚拟环境文件夹
+backend/.venv/
+backend/venv/
+backend/env/
+
+# 过滤 Python 编译缓存
+**/__pycache__/
+*.pyc
+
+# 过滤本地 SQLite 数据库文件
+backend/*.db
+backend/*.sqlite3
+
+# --- Frontend 前端过滤 ---
+# 过滤 Node.js 依赖包
+frontend/node_modules/
+
+# 过滤前端打包生成的产物
+frontend/dist/
+frontend/build/
+
+# 过滤前端日志文件
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# --- IDE 与系统配置文件 ---
+# 过滤 PyCharm 配置
+.idea/
+
+# 过滤 VS Code 配置
+.vscode/
+
+# 过滤操作系统临时文件
+.DS_Store
+Thumbs.db

@@ -1,5 +1,26 @@
 <template>
   <div class="dashboard-container">
+    <div class="carousel-section">
+      <el-carousel :interval="5000" type="card" height="320px">
+        <el-carousel-item v-for="item in roomTypeShowcase" :key="item.name">
+          <div class="room-card">
+            <img :src="item.img" class="room-img" />
+            <div class="room-overlay">
+              <div class="overlay-content">
+                <h3>{{ item.name }}</h3>
+                <p>{{ item.desc }}</p>
+                <div class="tags">
+                  <el-tag size="small" type="warning" effect="dark">精品推荐</el-tag>
+                  <el-tag size="small" type="info" effect="dark" style="margin-left: 8px">极致体验</el-tag>
+                </div>
+              </div>
+            </div>
+            <div class="room-title-bar">{{ item.name }}</div>
+          </div>
+        </el-carousel-item>
+      </el-carousel>
+    </div>
+
     <el-row :gutter="20" class="statistics">
       <el-col :span="6">
         <el-card shadow="hover" class="stat-card">
@@ -51,18 +72,16 @@
       <template #header>
         <div class="card-header">
           <span class="title">房态与运维控制台</span>
-          <div>
-            <el-button type="primary" @click="getRooms">刷新数据</el-button>
-          </div>
+          <el-button type="primary" @click="getRooms">刷新数据</el-button>
         </div>
       </template>
 
       <el-table :data="rooms" v-loading="loading" stripe border>
-        <el-table-column prop="number" label="房间号" width="100" />
+        <el-table-column prop="number" label="房间号" width="100" align="center" />
         <el-table-column prop="room_type" label="房型" />
         <el-table-column prop="price" label="房费/日">
           <template #default="scope">
-            <span style="color: #f56c6c; font-weight: bold">￥{{ scope.row.price }}</span>
+            <span class="price-text">￥{{ scope.row.price }}</span>
           </template>
         </el-table-column>
         
@@ -83,9 +102,7 @@
               <span style="color: #E6A23C; font-size: 12px">🧹 等待保洁处理...</span>
             </div>
             <div v-else-if="scope.row.status === '维修中'">
-              <el-tooltip :content="scope.row.maintenance_detail || '设施报修中'" placement="top">
-                <span style="color: #F56C6C; font-size: 12px; cursor: help">🛠️ {{ scope.row.maintenance_detail ? '查看详情' : '设施报修中' }}</span>
-              </el-tooltip>
+              <span style="color: #F56C6C; font-size: 12px">🛠️ 设施报修中</span>
             </div>
             <span v-else style="color: #999">-</span>
           </template>
@@ -96,8 +113,6 @@
             <el-button v-if="scope.row.status === '空闲'" size="small" type="warning" @click="openCheckIn(scope.row)">办理入住</el-button>
             <el-button v-if="scope.row.status === '已入住'" size="small" type="info" @click="openCheckOut(scope.row)">办理退房</el-button>
             <el-button v-if="scope.row.status === '待打扫'" size="small" type="success" @click="updateRoomStatus(scope.row, '空闲')">确认打扫</el-button>
-            
-            <!-- <el-button v-if="scope.row.status === '空闲'" size="small" type="danger" plain @click="goToConfig">去报修</el-button> -->
             <el-button v-if="scope.row.status === '维修中'" size="small" type="success" plain @click="updateRoomStatus(scope.row, '空闲')">修毕</el-button>
             <el-button size="small" type="danger" @click="handleDelete(scope.row.id)">删除</el-button>
           </template>
@@ -144,32 +159,60 @@
 import { ref, onMounted, computed } from 'vue'
 import request from '../../utils/request'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { useRouter } from 'vue-router'
 
-const router = useRouter()
+// 数据引用
 const rooms = ref([])
 const loading = ref(false)
 const showCheckInDialog = ref(false)
-const showCheckOutDialog = ref(false) 
-const currentRoom = ref(null)      
+const showCheckOutDialog = ref(false)
+const currentRoom = ref(null)
 const extraCharge = ref(0)
 const checkInForm = ref({ guest_name: '', guest_id_card: '', guest_phone: '' })
 
+// 房型展示数据
+const roomTypeShowcase = [
+  {
+    name: '商务麻将房',
+    img: 'https://images.unsplash.com/photo-1596394516093-501ba68a0ba6?w=800&q=80',
+    desc: '集成自动麻将机与商务洽谈区，是朋友聚会与休闲娱乐的首选。'
+  },
+  {
+    name: '标准双床房',
+    img: 'https://images.unsplash.com/photo-1566665797739-1674de7a421a?w=800&q=80',
+    desc: '经典双向配置，高品质纯棉床品，为您提供静谧的商旅睡眠。'
+  },
+  {
+    name: '影音大床房',
+    img: 'https://images.unsplash.com/photo-1590490360182-c33d57733427?w=800&q=80',
+    desc: '配备4K投影与影院级音响，让您在房间即可享受私人影院体验。'
+  },
+  {
+    name: '电竞双人间',
+    img: 'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=800&q=80',
+    desc: '4090顶级显卡与专业电竞椅，专为极致游戏玩家打造。'
+  }
+]
+
+// 计算入住率
 const occupancyRate = computed(() => {
   if (rooms.value.length === 0) return 0
   const occupied = rooms.value.filter(r => r.status === '已入住').length
   return ((occupied / rooms.value.length) * 100).toFixed(1)
 })
 
+// 获取房态颜色
 const getStatusType = (status) => {
   const map = { '空闲': 'success', '已入住': 'danger', '待打扫': 'warning', '维修中': 'info' }
   return map[status] || 'info'
 }
 
+// 核心业务方法
 const getRooms = async () => {
   loading.value = true
   try {
     rooms.value = await request.get('/api/rooms')
+  } catch (err) {
+    ElMessage.error('获取房态失败')
   } finally {
     loading.value = false
   }
@@ -183,12 +226,17 @@ const openCheckIn = (room) => {
 
 const submitCheckIn = async () => {
   if (!checkInForm.value.guest_name) return ElMessage.warning('姓名必填')
-  await request.put(`/api/rooms/${currentRoom.value.id}/status`, {
-    status: '已入住',
-    ...checkInForm.value
-  })
-  showCheckInDialog.value = false
-  getRooms()
+  try {
+    await request.put(`/api/rooms/${currentRoom.value.id}/status`, {
+      status: '已入住',
+      ...checkInForm.value
+    })
+    ElMessage.success('入住登记成功')
+    showCheckInDialog.value = false
+    getRooms()
+  } catch (err) {
+    ElMessage.error('操作失败')
+  }
 }
 
 const openCheckOut = (room) => {
@@ -198,53 +246,79 @@ const openCheckOut = (room) => {
 }
 
 const confirmCheckOut = async () => {
-  const total = currentRoom.value.price + extraCharge.value
-  await request.put(`/api/rooms/${currentRoom.value.id}/status`, {
-    status: '待打扫',
-    guest_name: '', guest_id_card: '', guest_phone: ''
-  })
-  ElMessageBox.alert(`结算完成！实收总额：￥${total}`, '收银凭据', { type: 'success' })
-  showCheckOutDialog.value = false
-  getRooms()
+  try {
+    const total = currentRoom.value.price + extraCharge.value
+    await request.put(`/api/rooms/${currentRoom.value.id}/status`, {
+      status: '待打扫',
+      guest_name: '', guest_id_card: '', guest_phone: ''
+    })
+    ElMessageBox.alert(`结算完成！实收总额：￥${total}`, '账单确认', { type: 'success' })
+    showCheckOutDialog.value = false
+    getRooms()
+  } catch (err) {
+    ElMessage.error('结算失败')
+  }
 }
 
 const updateRoomStatus = async (room, nextStatus) => {
-  await request.put(`/api/rooms/${room.id}/status`, {
-    status: nextStatus,
-    guest_name: '', guest_id_card: '', guest_phone: ''
-  })
-  ElMessage.success(`状态已更新为 ${nextStatus}`)
-  getRooms()
+  try {
+    await request.put(`/api/rooms/${room.id}/status`, {
+      status: nextStatus,
+      guest_name: '', guest_id_card: '', guest_phone: ''
+    })
+    ElMessage.success(`状态已更新为 ${nextStatus}`)
+    getRooms()
+  } catch (err) {
+    ElMessage.error('更新失败')
+  }
 }
 
 const handleDelete = (id) => {
-  ElMessageBox.confirm('确定删除吗？', '警告').then(async () => {
+  ElMessageBox.confirm('确定要删除这个房间吗？', '警告', { type: 'error' }).then(async () => {
     await request.delete(`/api/rooms/${id}`)
+    ElMessage.success('删除成功')
     getRooms()
   })
-}
-
-const goToConfig = () => {
-  router.push('/config') // 跳转到配置页进行精细化报修
 }
 
 onMounted(getRooms)
 </script>
 
 <style scoped>
-.dashboard-container { padding: 20px; background-color: #f5f7fa; min-height: 100vh; }
+.dashboard-container { padding: 25px; background-color: #f8fafc; min-height: 100vh; }
+
+/* 轮播图样式 */
+.carousel-section { margin-bottom: 30px; }
+.room-card { position: relative; width: 100%; height: 100%; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
+.room-img { width: 100%; height: 100%; object-fit: cover; transition: transform 0.6s ease; }
+.room-card:hover .room-img { transform: scale(1.1); }
+.room-overlay {
+  position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+  background: rgba(0, 0, 0, 0.75); display: flex; align-items: center; justify-content: center;
+  padding: 30px; box-sizing: border-box; opacity: 0; transition: opacity 0.4s ease;
+}
+.room-card:hover .room-overlay { opacity: 1; }
+.overlay-content { text-align: center; color: #fff; transform: translateY(20px); transition: transform 0.4s ease; }
+.room-card:hover .overlay-content { transform: translateY(0); }
+.overlay-content h3 { font-size: 24px; margin-bottom: 15px; }
+.overlay-content p { font-size: 14px; line-height: 1.6; margin-bottom: 20px; }
+.room-title-bar { position: absolute; bottom: 0; width: 100%; background: linear-gradient(transparent, rgba(0,0,0,0.8)); color: white; padding: 15px; text-align: center; font-weight: bold; }
+
+/* 统计卡片 */
 .statistics { margin-bottom: 25px; }
-.stat-card { border-radius: 12px; border: none; transition: transform 0.3s; }
-.stat-card:hover { transform: translateY(-5px); }
-.stat-content { display: flex; align-items: center; padding: 10px 5px; }
-.stat-icon { width: 54px; height: 54px; border-radius: 12px; display: flex; justify-content: center; align-items: center; font-size: 28px; margin-right: 15px; }
-.icon-blue { background: #ecf5ff; color: #409eff; }
-.icon-green { background: #f0f9eb; color: #67c23a; }
-.icon-orange { background: #fdf6ec; color: #e6a23c; }
-.icon-red { background: #fef0f0; color: #f56c6c; }
-.label { font-size: 13px; color: #909399; margin-bottom: 6px; }
-.value { font-size: 22px; font-weight: bold; color: #303133; }
-.table-card { border-radius: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.03); }
+.stat-card { border-radius: 12px; border: none; }
+.stat-content { display: flex; align-items: center; padding: 5px; }
+.stat-icon { width: 50px; height: 50px; border-radius: 10px; display: flex; justify-content: center; align-items: center; font-size: 24px; margin-right: 15px; }
+.icon-blue { background: #eff6ff; color: #3b82f6; }
+.icon-green { background: #f0fdf4; color: #22c55e; }
+.icon-orange { background: #fff7ed; color: #f59e0b; }
+.icon-red { background: #fef2f2; color: #ef4444; }
+.label { font-size: 13px; color: #64748b; }
+.value { font-size: 22px; font-weight: bold; color: #1e293b; }
+
+/* 表格样式 */
+.table-card { border-radius: 12px; }
 .card-header { display: flex; justify-content: space-between; align-items: center; }
-.title { font-size: 18px; font-weight: bold; color: #409eff; }
+.title { font-size: 16px; font-weight: bold; color: #334155; }
+.price-text { color: #e11d48; font-weight: 700; }
 </style>

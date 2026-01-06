@@ -104,3 +104,10 @@ class BookingResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+class WalkInRequest(BaseModel):
+    guest_name: str
+    guest_id_card: str
+    guest_phone: str
+    check_in_date: date
+    check_out_date: date

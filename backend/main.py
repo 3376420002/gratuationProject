@@ -2,7 +2,7 @@ from fastapi import FastAPI, Depends, HTTPException, Header
 from sqlalchemy.orm import Session
 from fastapi.middleware.cors import CORSMiddleware
 from datetime import date, timedelta
-import models, schemas
+import models,schemas,string
 from database import engine, get_db, SessionLocal
 from fastapi.responses import StreamingResponse
 from openpyxl.styles import Alignment, Font, PatternFill
@@ -31,17 +31,41 @@ def verify_token(token: str = Header(None)):
     return token
 
 
+# --- 辅助工具函数 ---
+def generate_random_name():
+    first_names = ["张", "王", "李", "刘", "赵", "陈", "杨", "周", "吴", "徐", "孙", "马", "朱", "胡", "郭", "何", "高",
+                   "林"]
+    last_names = ["伟", "芳", "娜", "秀兰", "洋", "敏", "静", "杰", "强", "涛", "丽", "艳", "帅", "磊", "军", "勇",
+                  "丹"]
+    name = random.choice(first_names) + random.choice(last_names)
+    if random.random() > 0.5:
+        name += random.choice(last_names)
+    return name
+
+
+def generate_random_phone():
+    prefixes = ["138", "139", "150", "188", "177", "131", "135"]
+    return random.choice(prefixes) + "".join(random.choices(string.digits, k=8))
+
+
+def generate_random_id_card():
+    area = random.randint(110000, 650000)
+    birthday = f"{random.randint(1980, 2005)}{random.randint(1, 12):02d}{random.randint(1, 28):02d}"
+    suffix = "".join(random.choices(string.digits, k=4))
+    return f"{area}{birthday}{suffix}"
+
+
+# --- 主初始化函数 ---
 def init_db_data(db: Session):
-    # 如果已经有管理员，说明不是空库，跳过初始化
     if db.query(models.User).filter(models.User.username == "admin").first():
         return
 
-    print("🚀 正在初始化演示数据...")
+    print("🚀 正在按照最新模型初始化演示数据...")
 
-    # 创建初始管理员
+    # 1. 创建管理员
     db.add(models.User(username="admin", password="123"))
 
-    # 预设房型模板
+    # 2. 房型模板
     templates = [
         {"type": "影音大床房", "config": "120寸投影, 5.1音响, 芝华仕沙发", "price": 388},
         {"type": "电竞双人间", "config": "RTX4090显卡, 240Hz显示器, 电竞椅", "price": 488},
@@ -49,7 +73,7 @@ def init_db_data(db: Session):
         {"type": "标准双床房", "config": "两张1.5米床, 独立卫浴, 办公桌", "price": 199}
     ]
 
-    # 创建 15 个房间 (101-105, 201-205, 301-305)
+    # 3. 创建房间
     rooms = []
     for floor in [1, 2, 3]:
         for i in range(1, 6):
@@ -63,36 +87,65 @@ def init_db_data(db: Session):
             )
             db.add(room)
             rooms.append(room)
-    db.commit()
+    db.flush()
 
-    # 创建 50 条预订记录，涵盖过去和未来
-    names = ["张伟", "王芳", "李娜", "刘洋", "陈静", "杨光", "赵敏", "周涛", "迈克尔", "艾米丽"]
+    # 4. 初始化会员 (适配你的 Member 模型)
+    members = []
+    levels = ["普通会员", "白金会员", "钻石会员"]
+    for _ in range(20):
+        m_name = generate_random_name()
+        m_phone = generate_random_phone()
+        member = models.Member(
+            name=m_name,
+            phone=m_phone,
+            password="123",  # 你的模型有这个字段，初始化默认给123
+            level=random.choice(levels),
+            points=random.randint(100, 5000),
+            balance=float(random.randint(0, 2000)),
+            reg_date=date.today() - timedelta(days=random.randint(1, 365))  # 适配你的字段名 reg_date
+        )
+        db.add(member)
+        members.append(member)
+    db.flush()
+
+    # 5. 初始化预订与住客同步
     today = date.today()
-
     for _ in range(50):
         room = random.choice(rooms)
-        start_offset = random.randint(-15, 10)  # 过去15天到未来10天
-        stay_days = random.randint(1, 4)
-        start_date = today + timedelta(days=start_offset)
-        end_date = start_date + timedelta(days=stay_days)
+        start_date = today + timedelta(days=random.randint(-15, 10))
+        end_date = start_date + timedelta(days=random.randint(1, 4))
 
-        # 判定初始状态
+        # 模拟会员/散客分配身份证（Room表需要身份证字段，Member表不需要）
+        is_member = random.random() > 0.4
+        current_id_card = generate_random_id_card()  # 无论是不是会员，入住都要身份证
+
+        if is_member:
+            m = random.choice(members)
+            g_name, g_phone = m.name, m.phone
+        else:
+            g_name, g_phone = generate_random_name(), generate_random_phone()
+
         status = "待入住"
         if end_date < today:
             status = "已离店/完成"
         elif start_date <= today <= end_date:
             status = "入住中"
-            room.status = "已入住"  # 同步房间状态
+            # 同步更新 Room 表 (Room模型有这些字段)
+            room.status = "已入住"
+            room.guest_name = g_name
+            room.guest_phone = g_phone
+            room.guest_id_card = current_id_card
 
         db.add(models.Booking(
             room_id=room.id,
-            guest_name=random.choice(names),
+            guest_name=g_name,
             start_date=start_date,
             end_date=end_date,
             status=status
         ))
+
     db.commit()
-    print("✅ 初始数据填充完毕！")
+    print("✅ 数据初始化成功！")
 
 
 @app.on_event("startup")
@@ -531,3 +584,121 @@ def create_comment(comment: schemas.CommentBase, db: Session = Depends(get_db)):
 def get_room_comments(room_id: int, db: Session = Depends(get_db)):
     return db.query(models.Comment).filter(models.Comment.room_id == room_id).all()
 
+
+# 处理实名入住，并将信息写入 Room 表
+@app.post("/api/bookings/{booking_id}/checkin")
+def checkin_booking(booking_id: int, data: schemas.RoomStatusUpdate, db: Session = Depends(get_db)):
+    # 1. 查找订单
+    booking = db.query(models.Booking).filter(models.Booking.id == booking_id).first()
+    if not booking:
+        raise HTTPException(status_code=404, detail="未找到预订订单")
+
+    # 2. 查找关联房间
+    room = db.query(models.Room).filter(models.Room.id == booking.room_id).first()
+    if not room:
+        raise HTTPException(status_code=404, detail="未找到关联房间")
+
+    # 3. 更新订单状态
+    booking.status = "入住中"
+
+    # 4. 【核心修复】将实名信息同步到房间表
+    # 这样 Dashboard 页面请求 /api/rooms 时才能拿到这些值
+    room.status = "已入住"
+    room.guest_name = data.guest_name
+    room.guest_id_card = data.guest_id_card
+    room.guest_phone = data.guest_phone
+
+    db.commit()
+    return {"message": "实名入住办理成功"}
+
+
+@app.post("/api/rooms/{room_id}/walk-in")
+def room_walk_in(room_id: int, request: schemas.WalkInRequest, db: Session = Depends(get_db)):
+    # 注意上面的类型注解变成了 schemas.WalkInRequest
+
+    # 1. 获取房间
+    room = db.query(models.Room).filter(models.Room.id == room_id).first()
+    if not room:
+        raise HTTPException(status_code=404, detail="房间不存在")
+    if room.status == "已入住":
+        raise HTTPException(status_code=400, detail="该房间已有客人")
+
+    # 2. 创建订单记录
+    new_booking = models.Booking(
+        room_id=room.id,
+        guest_name=request.guest_name,
+        start_date=request.check_in_date,
+        end_date=request.check_out_date,
+        status="入住中"
+    )
+    db.add(new_booking)
+
+    # 3. 更新房间物理状态
+    room.status = "已入住"
+    room.guest_name = request.guest_name
+    room.guest_id_card = request.guest_id_card
+    room.guest_phone = request.guest_phone
+
+    db.commit()
+    return {"message": "入住办理成功", "booking_id": new_booking.id}
+
+
+# 2. 预结账信息 (获取退房账单)
+@app.get("/api/rooms/{room_id}/bill")
+def get_room_bill(room_id: int, db: Session = Depends(get_db)):
+    room = db.query(models.Room).filter(models.Room.id == room_id).first()
+    if room.status != "已入住":
+        raise HTTPException(status_code=400, detail="该房间未入住，无法结账")
+
+    # 找到该房间当前正在进行的订单
+    # 逻辑：查找关联该房间，且状态不是“已离店”的最新订单
+    booking = db.query(models.Booking).filter(
+        models.Booking.room_id == room_id,
+        models.Booking.status == "入住中"
+    ).order_by(models.Booking.id.desc()).first()
+
+    if not booking:
+        # 如果找不到订单（可能是老数据），就按1天计算
+        days = 1
+        booking_id = 0
+    else:
+        # 计算实际入住天数
+        today = date.today()
+        # 如果入住日期是今天，按1天算；否则按实际差值算
+        delta = (today - booking.start_date).days
+        days = delta if delta > 0 else 1
+        booking_id = booking.id
+
+    total_amount = days * room.price
+
+    return {
+        "room_number": room.number,
+        "room_type": room.room_type,
+        "guest_name": room.guest_name,
+        "price_per_night": room.price,
+        "stay_days": days,
+        "total_amount": total_amount,
+        "booking_id": booking_id  # 返回订单ID方便后续结账
+    }
+
+
+# 3. 确认结账退房
+@app.post("/api/bookings/{booking_id}/confirm-checkout")
+def confirm_checkout(booking_id: int, db: Session = Depends(get_db)):
+    booking = db.query(models.Booking).filter(models.Booking.id == booking_id).first()
+    if not booking:
+        raise HTTPException(status_code=404, detail="订单不存在")
+
+    # 更新订单
+    booking.status = "已离店/完成"
+    # 这里可以加入 actual_revenue 更新逻辑
+
+    # 释放房间
+    room = db.query(models.Room).filter(models.Room.id == booking.room_id).first()
+    room.status = "待打扫"  # 结账后变为待打扫
+    room.guest_name = None
+    room.guest_id_card = None
+    room.guest_phone = None
+
+    db.commit()
+    return {"message": "退房结账成功"}

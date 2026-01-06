@@ -27,7 +27,7 @@ echo ==========================================
 cd /d "%ROOT_DIR%backend"
 if exist ".venv\Scripts\python.exe" (
     :: 使用 start 并在新窗口运行，同时强制指定主机和端口
-    start "Hotel-Backend" cmd /k ".venv\Scripts\python.exe -m uvicorn main:app --host 127.0.0.1 --port 8001"
+    start "Hotel-Backend" cmd /k ".venv\Scripts\python.exe -m uvicorn main:app --host 127.0.0.1 --port 8088"
 ) else (
     echo [错误] 在 %ROOT_DIR%backend 下没找到 venv 环境！
     pause

@@ -28,6 +28,11 @@
           <el-icon><House /></el-icon>
           <span>客房配置</span>
         </el-menu-item>
+
+        <el-menu-item index="/member">
+          <el-icon><User /></el-icon>
+          <span>会员管理</span>
+        </el-menu-item>
         
         <el-menu-item index="/reports">
           <el-icon><PieChart /></el-icon>
@@ -68,7 +73,7 @@
 <script setup>
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Odometer, Calendar, House, PieChart, ArrowDown } from '@element-plus/icons-vue'
+import { Odometer, Calendar, House, PieChart, ArrowDown, User } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const router = useRouter()

@@ -1,25 +1,24 @@
 from fastapi import FastAPI, Depends, HTTPException, Header
 from sqlalchemy.orm import Session
 from fastapi.middleware.cors import CORSMiddleware
-from typing import Optional, List
-from datetime import date, datetime, timedelta
-from sqlalchemy import func
-import models, schemas, database
-from database import engine, get_db
+from datetime import date, timedelta
+import models, schemas
+from database import engine, get_db, SessionLocal
 from fastapi.responses import StreamingResponse
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 import io
 import pandas as pd
+import random
+from typing import List
 
 models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="智慧酒店管理系统后端")
 
-# 跨域
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # 允许所有来源，开发环境比较方便
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -32,6 +31,79 @@ def verify_token(token: str = Header(None)):
     return token
 
 
+def init_db_data(db: Session):
+    # 如果已经有管理员，说明不是空库，跳过初始化
+    if db.query(models.User).filter(models.User.username == "admin").first():
+        return
+
+    print("🚀 正在初始化演示数据...")
+
+    # 创建初始管理员
+    db.add(models.User(username="admin", password="123"))
+
+    # 预设房型模板
+    templates = [
+        {"type": "影音大床房", "config": "120寸投影, 5.1音响, 芝华仕沙发", "price": 388},
+        {"type": "电竞双人间", "config": "RTX4090显卡, 240Hz显示器, 电竞椅", "price": 488},
+        {"type": "商务麻将房", "config": "自动麻将机, 功夫茶具, 隔音处理", "price": 588},
+        {"type": "标准双床房", "config": "两张1.5米床, 独立卫浴, 办公桌", "price": 199}
+    ]
+
+    # 创建 15 个房间 (101-105, 201-205, 301-305)
+    rooms = []
+    for floor in [1, 2, 3]:
+        for i in range(1, 6):
+            tpl = random.choice(templates)
+            room = models.Room(
+                number=f"{floor}0{i}",
+                room_type=tpl["type"],
+                configuration=tpl["config"],
+                price=tpl["price"],
+                status="空闲"
+            )
+            db.add(room)
+            rooms.append(room)
+    db.commit()
+
+    # 创建 50 条预订记录，涵盖过去和未来
+    names = ["张伟", "王芳", "李娜", "刘洋", "陈静", "杨光", "赵敏", "周涛", "迈克尔", "艾米丽"]
+    today = date.today()
+
+    for _ in range(50):
+        room = random.choice(rooms)
+        start_offset = random.randint(-15, 10)  # 过去15天到未来10天
+        stay_days = random.randint(1, 4)
+        start_date = today + timedelta(days=start_offset)
+        end_date = start_date + timedelta(days=stay_days)
+
+        # 判定初始状态
+        status = "待入住"
+        if end_date < today:
+            status = "已离店/完成"
+        elif start_date <= today <= end_date:
+            status = "入住中"
+            room.status = "已入住"  # 同步房间状态
+
+        db.add(models.Booking(
+            room_id=room.id,
+            guest_name=random.choice(names),
+            start_date=start_date,
+            end_date=end_date,
+            status=status
+        ))
+    db.commit()
+    print("✅ 初始数据填充完毕！")
+
+
+@app.on_event("startup")
+def startup_event():
+    db = SessionLocal()
+    try:
+        init_db_data(db)
+    finally:
+        db.close()
+
+
 @app.post("/api/login")
 def login(request: schemas.LoginRequest, db: Session = Depends(get_db)):
     user = db.query(models.User).filter(models.User.username == request.username).first()
@@ -40,15 +112,15 @@ def login(request: schemas.LoginRequest, db: Session = Depends(get_db)):
     return {"message": "登录成功", "token": "fake-jwt-token", "username": user.username}
 
 
-@app.post("/api/init")
-def init_data(db: Session = Depends(get_db)):
-    if db.query(models.User).count() == 0:
-        db.add(models.User(username="admin", password="123"))
-    if db.query(models.Room).count() == 0:
-        db.add(models.Room(number="101", room_type="标准间", price=199.0))
-        db.add(models.Room(number="201", room_type="豪华大床房", price=399.0))
-    db.commit()
-    return {"msg": "初始化成功"}
+# @app.post("/api/init")
+# def init_data(db: Session = Depends(get_db)):
+#     if db.query(models.User).count() == 0:
+#         db.add(models.User(username="admin", password="123"))
+#     if db.query(models.Room).count() == 0:
+#         db.add(models.Room(number="101", room_type="标准间", price=199.0))
+#         db.add(models.Room(number="201", room_type="豪华大床房", price=399.0))
+#     db.commit()
+#     return {"msg": "初始化成功"}
 
 
 @app.get("/api/rooms")
@@ -159,11 +231,16 @@ def update_room_info(room_id: int, room_data: schemas.RoomUpdate, db: Session = 
     if not db_room:
         raise HTTPException(status_code=404, detail="未找到该房间")
 
+    # 1. 更新基本字段
     db_room.room_type = room_data.room_type
     db_room.price = room_data.price
 
+    # 2. 更新配置字段 (现在 room_data.configuration 一定有值或为 None)
+    db_room.configuration = room_data.configuration
+
     db.commit()
-    return {"message": "更新成功"}
+    db.refresh(db_room)  # 刷新对象，确保返回的是数据库最新状态
+    return {"message": "更新成功", "data": db_room}
 
 
 from sqlalchemy import func
@@ -238,15 +315,17 @@ def get_room_type_distribution(db: Session = Depends(get_db)):
 
 
 # --- 新增：实时房态墙数据 ---
+# --- 修改后的实时房态墙数据接口 ---
 @app.get("/api/reports/room-wall")
 def get_room_wall(db: Session = Depends(get_db)):
     rooms = db.query(models.Room).all()
-    # 返回精简的房态网格数据
     return [{
+        "id": r.id,
         "number": r.number,
-        "type": r.room_type,
-        "status": r.status,  # 已入住、空闲、维修等
-        "price": r.price
+        "room_type": r.room_type, # 统一使用 room_type
+        "status": r.status,
+        "price": r.price,
+        "configuration": r.configuration  # 必须返回配置，前端才能显示
     } for r in rooms]
 
 
@@ -337,3 +416,118 @@ def export_excel(db: Session = Depends(get_db)):
             "Cache-Control": "no-cache"
         }
     )
+
+
+# 1. 获取所有会员
+@app.get("/api/members", response_model=List[schemas.Member])
+def get_members(db: Session = Depends(get_db)):
+    return db.query(models.Member).all()
+
+
+# 2. 注册/新增会员
+@app.post("/api/members", response_model=schemas.Member)
+def create_member(member: schemas.MemberCreate, db: Session = Depends(get_db)):
+    db_member = models.Member(**member.dict())
+    db.add(db_member)
+    db.commit()
+    db.refresh(db_member)
+    return db_member
+
+
+# 3. 更新会员信息 (改等级、充值、加积分)
+@app.put("/api/members/{member_id}")
+def update_member(member_id: int, data: schemas.MemberUpdate, db: Session = Depends(get_db)):
+    db_member = db.query(models.Member).filter(models.Member.id == member_id).first()
+    if not db_member:
+        raise HTTPException(status_code=404, detail="会员不存在")
+
+    # 动态更新字段
+    update_data = data.dict(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(db_member, key, value)
+
+    db.commit()
+    db.refresh(db_member)
+    return {"message": "更新成功", "data": db_member}
+
+
+# 4. 删除会员
+@app.delete("/api/members/{member_id}")
+def delete_member(member_id: int, db: Session = Depends(get_db)):
+    db_member = db.query(models.Member).filter(models.Member.id == member_id).first()
+    if not db_member:
+        raise HTTPException(status_code=404, detail="会员不存在")
+    db.delete(db_member)
+    db.commit()
+    return {"message": "会员已注销"}
+
+
+# 5. 会员结算与结账接口
+@app.post("/api/bookings/{booking_id}/checkout")
+def checkout_booking(booking_id: int, db: Session = Depends(get_db)):
+    # 1. 查找订单
+    booking = db.query(models.Booking).filter(models.Booking.id == booking_id).first()
+    if not booking:
+        raise HTTPException(status_code=404, detail="订单未找到")
+
+    # 2. 查找关联房间
+    room = db.query(models.Room).filter(models.Room.id == booking.room_id).first()
+
+    # 3. 计算折扣逻辑 (假设根据手机号匹配会员)
+    # 这里我们尝试在数据库寻找同名的会员，或者你可以让前端传个 member_id 过来
+    member = db.query(models.Member).filter(models.Member.name == booking.guest_name).first()
+
+    original_price = room.price
+    final_price = original_price
+    discount_msg = "原价结算"
+
+    if member:
+        # 根据等级打折
+        if member.level == "钻石会员":
+            final_price = original_price * 0.8  # 8折
+            discount_msg = "钻石会员 8 折优惠"
+        elif member.level == "白金会员":
+            final_price = original_price * 0.9  # 9折
+            discount_msg = "白金会员 9 折优惠"
+
+        # 增加积分 (1元=1分)
+        member.points += int(final_price)
+        # 记录积分流水
+        db.add(models.MemberLog(
+            member_id=member.id,
+            type="积分",
+            amount=float(int(final_price)),
+            reason=f"房间 {room.number} 结账获得积分"
+        ))
+
+    # 4. 更新订单和房间状态
+    booking.status = "已离店/完成"
+    booking.actual_revenue = final_price  # 记录实际营收
+    room.status = "空闲"
+    room.guest_name = None  # 清空房间住客信息
+
+    db.commit()
+
+    return {
+        "message": "结账成功",
+        "original_price": original_price,
+        "final_price": final_price,
+        "discount_info": discount_msg,
+        "points_earned": int(final_price) if member else 0
+    }
+
+
+# 6. 提交房间评价
+@app.post("/api/comments")
+def create_comment(comment: schemas.CommentBase, db: Session = Depends(get_db)):
+    new_comment = models.Comment(**comment.dict())
+    db.add(new_comment)
+    db.commit()
+    db.refresh(new_comment)
+    return {"message": "感谢您的评价！", "data": new_comment}
+
+# 7. 获取某个房间的所有评价
+@app.get("/api/rooms/{room_id}/comments")
+def get_room_comments(room_id: int, db: Session = Depends(get_db)):
+    return db.query(models.Comment).filter(models.Comment.room_id == room_id).all()
+

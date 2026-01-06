@@ -1,6 +1,5 @@
 <template>
   <div class="dashboard-container">
-
     <el-row :gutter="20" class="statistics">
       <el-col :span="6">
         <el-card shadow="hover" class="stat-card">
@@ -53,7 +52,6 @@
         <div class="card-header">
           <span class="title">房态与运维控制台</span>
           <div>
-            <!-- <el-button type="success" @click="showDialog = true">新增房间</el-button> -->
             <el-button type="primary" @click="getRooms">刷新数据</el-button>
           </div>
         </div>
@@ -79,13 +77,15 @@
         <el-table-column label="住客/备注" width="180">
           <template #default="scope">
             <div v-if="scope.row.status === '已入住'">
-              <el-tag type="info" effect="plain">👤 {{ scope.row.guest_name }}</el-tag>
+              <el-tag type="info" effect="plain">👤 {{ scope.row.guest_name || '散客' }}</el-tag>
             </div>
             <div v-else-if="scope.row.status === '待打扫'">
               <span style="color: #E6A23C; font-size: 12px">🧹 等待保洁处理...</span>
             </div>
             <div v-else-if="scope.row.status === '维修中'">
-              <span style="color: #F56C6C; font-size: 12px">🛠️ 设施报修中</span>
+              <el-tooltip :content="scope.row.maintenance_detail || '设施报修中'" placement="top">
+                <span style="color: #F56C6C; font-size: 12px; cursor: help">🛠️ {{ scope.row.maintenance_detail ? '查看详情' : '设施报修中' }}</span>
+              </el-tooltip>
             </div>
             <span v-else style="color: #999">-</span>
           </template>
@@ -97,30 +97,13 @@
             <el-button v-if="scope.row.status === '已入住'" size="small" type="info" @click="openCheckOut(scope.row)">办理退房</el-button>
             <el-button v-if="scope.row.status === '待打扫'" size="small" type="success" @click="updateRoomStatus(scope.row, '空闲')">确认打扫</el-button>
             
-            <el-button v-if="scope.row.status === '空闲'" size="small" type="danger" plain @click="updateRoomStatus(scope.row, '维修中')">报修</el-button>
+            <!-- <el-button v-if="scope.row.status === '空闲'" size="small" type="danger" plain @click="goToConfig">去报修</el-button> -->
             <el-button v-if="scope.row.status === '维修中'" size="small" type="success" plain @click="updateRoomStatus(scope.row, '空闲')">修毕</el-button>
             <el-button size="small" type="danger" @click="handleDelete(scope.row.id)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
     </el-card>
-
-    <el-dialog v-model="showDialog" title="新增客房" width="400px">
-      <el-form :model="newRoom" label-width="80px">
-        <el-form-item label="房间号"><el-input v-model="newRoom.number" /></el-form-item>
-        <el-form-item label="房型">
-          <el-select v-model="newRoom.room_type" style="width: 100%">
-            <el-option label="标准单人间" value="标准单人间" />
-            <el-option label="豪华大床房" value="豪华大床房" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="价格"><el-input-number v-model="newRoom.price" :min="0" /></el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="showDialog = false">取消</el-button>
-        <el-button type="primary" @click="handleAddRoom">提交</el-button>
-      </template>
-    </el-dialog>
 
     <el-dialog v-model="showCheckInDialog" title="办理入住登记" width="450px">
       <el-form :model="checkInForm" label-width="100px">
@@ -143,7 +126,6 @@
       <el-form label-width="100px">
         <el-form-item label="额外消费">
           <el-input-number v-model="extraCharge" :min="0" style="width: 100%" />
-          <div style="font-size: 12px; color: #999">请输入小卖部、饮品等额外费用</div>
         </el-form-item>
         <div style="text-align: right; margin-top: 20px; border-top: 1px dashed #ccc; padding-top: 20px">
           <span style="font-size: 16px">应收总计：</span>
@@ -155,7 +137,6 @@
         <el-button type="primary" @click="confirmCheckOut">确认收款并退房</el-button>
       </template>
     </el-dialog>
-
   </div>
 </template>
 
@@ -168,15 +149,11 @@ import { useRouter } from 'vue-router'
 const router = useRouter()
 const rooms = ref([])
 const loading = ref(false)
-const showDialog = ref(false)
 const showCheckInDialog = ref(false)
 const showCheckOutDialog = ref(false) 
 const currentRoom = ref(null)      
 const extraCharge = ref(0)
-
-const newRoom = ref({ number: '', room_type: '', price: 0, status: '空闲' })
 const checkInForm = ref({ guest_name: '', guest_id_card: '', guest_phone: '' })
-
 
 const occupancyRate = computed(() => {
   if (rooms.value.length === 0) return 0
@@ -191,8 +168,11 @@ const getStatusType = (status) => {
 
 const getRooms = async () => {
   loading.value = true
-  rooms.value = await request.get('/api/rooms')
-  loading.value = false
+  try {
+    rooms.value = await request.get('/api/rooms')
+  } finally {
+    loading.value = false
+  }
 }
 
 const openCheckIn = (room) => {
@@ -213,29 +193,19 @@ const submitCheckIn = async () => {
 
 const openCheckOut = (room) => {
   currentRoom.value = room
-  extraCharge.value = 0 // 重置金额
+  extraCharge.value = 0
   showCheckOutDialog.value = true
 }
 
 const confirmCheckOut = async () => {
   const total = currentRoom.value.price + extraCharge.value
-  try {
-    await request.put(`/api/rooms/${currentRoom.value.id}/status`, {
-      status: '待打扫',
-      guest_name: '', guest_id_card: '', guest_phone: ''
-    })
-    
-    ElMessageBox.alert(
-      `结算完成！<br/>房费：￥${currentRoom.value.price}<br/>额外消费：￥${extraCharge.value}<hr/><b>实收总额：￥${total}</b>`,
-      '收银凭据',
-      { dangerouslyUseHTMLString: true, type: 'success' }
-    )
-    
-    showCheckOutDialog.value = false
-    getRooms()
-  } catch (error) {
-    ElMessage.error('结算失败')
-  }
+  await request.put(`/api/rooms/${currentRoom.value.id}/status`, {
+    status: '待打扫',
+    guest_name: '', guest_id_card: '', guest_phone: ''
+  })
+  ElMessageBox.alert(`结算完成！实收总额：￥${total}`, '收银凭据', { type: 'success' })
+  showCheckOutDialog.value = false
+  getRooms()
 }
 
 const updateRoomStatus = async (room, nextStatus) => {
@@ -243,33 +213,26 @@ const updateRoomStatus = async (room, nextStatus) => {
     status: nextStatus,
     guest_name: '', guest_id_card: '', guest_phone: ''
   })
-  ElMessage.success(`操作成功`)
+  ElMessage.success(`状态已更新为 ${nextStatus}`)
   getRooms()
 }
 
-const handleAddRoom = async () => {
-  await request.post('/api/rooms', newRoom.value)
-  showDialog.value = false
-  getRooms()
-}
 const handleDelete = (id) => {
   ElMessageBox.confirm('确定删除吗？', '警告').then(async () => {
     await request.delete(`/api/rooms/${id}`)
     getRooms()
   })
 }
-const handleLogout = () => {
-  localStorage.removeItem('token')
-  router.push('/login')
+
+const goToConfig = () => {
+  router.push('/config') // 跳转到配置页进行精细化报修
 }
 
 onMounted(getRooms)
 </script>
 
 <style scoped>
-.dashboard-container { padding: 0 20px 20px 20px; background-color: #f5f7fa; min-height: 100vh; }
-.top-header { height: 64px; display: flex; justify-content: space-between; align-items: center; background-color: #fff; margin: 0 -20px 25px -20px; padding: 0 30px; box-shadow: 0 2px 12px rgba(0,0,0,0.05); }
-.system-title { font-size: 22px; font-weight: bold; color: #409EFF; }
+.dashboard-container { padding: 20px; background-color: #f5f7fa; min-height: 100vh; }
 .statistics { margin-bottom: 25px; }
 .stat-card { border-radius: 12px; border: none; transition: transform 0.3s; }
 .stat-card:hover { transform: translateY(-5px); }
